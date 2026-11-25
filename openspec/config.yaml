@@ -1,5 +1,16 @@
 schema: spec-driven
 
+context: |
+  Research Desk: app de análisis de acciones con múltiples agentes.
+  Stack: Next.js App Router, TypeScript estricto, Vercel AI SDK,
+  Neon AI Gateway (endpoint compatible con OpenAI) para los modelos,
+  Neon Postgres, Finnhub para market data, Langfuse para tracing.
+  Restricciones:
+  - No agregar dependencias nuevas sin aprobación explícita; si un diseño o
+    tarea requiere una, listarla como decisión pendiente.
+  - Los modelos se eligen por variable de entorno; nunca hardcodear IDs de modelo.
+  - Las claves y secretos van solo en .env.local; nunca en código, specs ni commits.
+
 # Project context (optional)
 # Add only constraints that should guide OpenSpec artifacts and workflows.
 # Include constraints an agent cannot infer by reading the code.
