@@ -5,8 +5,8 @@
 - El repo es el scaffold de `create-next-app` con Next.js 16.4 (App Router, `cacheComponents: true`), React 19.3, TypeScript `strict` y alias `@/*` a la raíz. No hay `lib/`, route handlers ni dependencias de AI, zod u observabilidad instaladas.
 - `.env.local` ya define `NEON_AI_GATEWAY_BASE_URL`, `NEON_AI_GATEWAY_TOKEN`, `FINNHUB_API_KEY`, `LANGFUSE_PUBLIC_KEY`, `LANGFUSE_SECRET_KEY`, `LANGFUSE_BASE_URL` y `MODEL_MARKET_DATA`.
 - Node local: v22.23. Es el mínimo que exigen AI SDK 7 y `@langfuse/vercel-ai-sdk` (`>=22`). Node 22 terminó su mantenimiento en abril de 2026, así que para producción conviene Node 24 LTS.
-- La versión vigente del AI SDK es la **7** (`ai@7.0.181`). Respecto de la 6 cambia nombres que este diseño usa: `system` → `instructions`, `stepCountIs` → `isStepCount`, `experimental_telemetry` → `telemetry`, la telemetría OTel salió del paquete `ai`, y los helpers `result.toUIMessageStream*()` quedaron deprecados en favor de helpers sin estado (`toUIMessageStream({ stream })`). Al implementar, cada API se verifica contra `node_modules/ai/docs/` (skill `ai-sdk`), no de memoria.
-- El Neon AI Gateway devuelve `pricing: null` en `/v1/models`, así que el costo no se puede obtener del gateway. Los precios de referencia del catálogo de Neon están en models.dev (skill `neon-ai-gateway`).
+- La versión vigente del AI SDK es la **7** (`ai@7.0.183`, la instalada). Respecto de la 6 cambia nombres que este diseño usa: `system` → `instructions`, `stepCountIs` → `isStepCount`, `experimental_telemetry` → `telemetry`, la telemetría OTel salió del paquete `ai`, y los helpers `result.toUIMessageStream*()` quedaron deprecados en favor de helpers sin estado (`toUIMessageStream({ stream })`). Al implementar, cada API se verifica contra `node_modules/ai/docs/` (skill `ai-sdk`), no de memoria.
+- El Neon AI Gateway informa precios por token en `/v1/models`, en el campo `pricing` (`prompt`, `completion` e `input_cache_read`, en USD por token). Verificado el 2026-11-26 para `gpt-5-4-nano`: 0.0000002 / 0.00000125 / 0.00000002. Langfuse no lee esos precios del gateway: hay que cargarlos como definición de modelo (Decisión 9). models.dev queda como respaldo si algún modelo viene con `pricing: null`.
 - Motivación: ver proposal.md (Why). Requisitos: ver `specs/`.
 
 ## Goals / Non-Goals
@@ -113,6 +113,7 @@ El modelo nunca escribe la procedencia, así que no la puede inventar.
 - No se usa `createAgentUIStreamResponse`: entrega el stream del agente directo y no deja intercalar la verificación de fuentes antes de la parte final.
 - `onError` devuelve siempre `"No pudimos completar la consulta. Referencia: <correlationId>"`, y el error real va a `console.error` con el `correlationId`.
 - Si falta `MODEL_MARKET_DATA` o alguna variable de Neon o Finnhub, `lib/env.ts` lanza al resolverla. El handler lo captura, responde 500 genérico y lo registra.
+- `lib/llm/models.ts` crea el provider con `createNeon({ baseURL, apiKey })` a partir de `getNeonGatewayEnv()` y `getMarketDataModelId()` de `lib/env.ts`, en lugar de la instancia `neon` por defecto, que lee `process.env` por su cuenta. Así hay una sola fuente de configuración, y una variable faltante sale como `EnvError` (con el nombre, sin el valor) antes de cualquier request. `lib/env.ts` valida por sección y al usarla, no al importarla, así que las evals en modo fixtures no exigen `FINNHUB_API_KEY`.
 - `@neon/ai-sdk-provider` rechaza con `APICallError` y pone en `error.message` el motivo textual del gateway. Ese texto nunca llega al cliente: queda solo en el log del servidor.
 
 ### 8. UI
@@ -138,7 +139,7 @@ Para AI SDK 7, Langfuse recomienda su integración `@langfuse/vercel-ai-sdk` reg
 - **Filtro:** se usa el filtro por defecto de `LangfuseSpanProcessor` (exporta spans de Langfuse y de GenAI/LLM). Los spans HTTP automáticos de Next.js quedan afuera, así que no salen URLs ni headers. Pasar `shouldExportSpan` reemplazaría ese filtro, así que no se define uno propio.
 - **Máscara:** el `mask` del `LangfuseSpanProcessor` se aplica al input, el output y la metadata de cada observación. Reemplaza por `[REDACTED]` los valores de las claves configuradas y los patrones `Bearer …` y `nt_live_…`. Es una segunda barrera por si algo se filtra en un argumento.
 - **Flush:** en el route handler, `after(() => spanProcessor.forceFlush())` de `next/server`, para no demorar la respuesta. El procesador exporta en lote y sus errores no se propagan.
-- **Costo:** el gateway no informa precios. Langfuse calcula el costo cruzando el nombre del modelo de la generation con sus definiciones de modelo; para IDs del catálogo de Neon que Langfuse no conozca, se carga una vez una definición de modelo con los precios publicados en models.dev (página del proveedor Neon). Se carga desde **Project Settings > Models** o con `langfuse-cli` (API de modelos); es configuración, no código. **Alternativa descartada:** calcular el costo en código con una tabla de precios propia; duplica datos que cambian y Langfuse ya lo resuelve.
+- **Costo:** el gateway informa precios en `/v1/models`, pero Langfuse no los toma de ahí. Langfuse calcula el costo cruzando el nombre del modelo de la generation con sus definiciones de modelo. Para los IDs que no conozca, se carga una vez una definición con los precios de `/v1/models` de la branch (models.dev como respaldo). Se carga desde **Project Settings > Models** o con `langfuse-cli` (API de modelos); es configuración, no código. **Alternativa descartada:** calcular el costo en código con una tabla de precios propia; duplica datos que cambian y Langfuse ya lo resuelve.
 
 ### 10. Evals
 
@@ -153,25 +154,29 @@ Para AI SDK 7, Langfuse recomienda su integración `@langfuse/vercel-ai-sdk` reg
 
 Los tests unitarios (validación, mapeo de errores, parseo de Finnhub, verificación de fuentes, checks de evals) usan `node:test` + `node:assert` ejecutados con `tsx`. Script: `"test": "tsx --conditions=react-server --test \"lib/**/*.test.ts\" \"app/**/*.test.tsx\" \"evals/**/*.test.ts\""`. Para Finnhub, los tests inyectan un `fetch` falso en el cliente, sin red. De la UI, el render seguro se testea con `renderToStaticMarkup` (de `react-dom/server`, ya instalado); el flujo de streaming se verifica en el navegador. **Alternativa descartada:** `vitest`, que sería una dependencia más sin ganancia real a este tamaño.
 
-### 12. Dependencias — DECISIÓN PENDIENTE
+### 12. Dependencias — APROBADA E INSTALADA
 
-Nada de esto está instalado. Hace falta aprobación antes de la tarea 1.
+Aprobada por el usuario e instalada en la tarea 1.2 con `--save-exact`.
 
-| Paquete | Versión (npm, 2026-11-25) | Tipo | Para qué | Alternativa sin el paquete |
+| Paquete | Versión instalada | Tipo | Para qué | Alternativa sin el paquete |
 |---|---|---|---|---|
-| `ai` | 7.0.181 | runtime | `ToolLoopAgent`, `tool`, `Output`, `isStepCount`, `registerTelemetry`, UI message stream | — (es el stack definido) |
-| `@neon/ai-sdk-provider` | 1.6.0 | runtime | provider del gateway; lee `NEON_AI_GATEWAY_*` sin configuración y enruta por dialecto. Soporta `ai@^6 \|\| ^7` | `@ai-sdk/openai` con `createOpenAI` con `apiKey` = `NEON_AI_GATEWAY_TOKEN` y `baseURL` = `NEON_AI_GATEWAY_BASE_URL` + `/openai/v1` |
-| `@ai-sdk/react` | 4.0.186 | runtime | `useChat` y el parseo del stream en el cliente (depende de `ai@7.0.181`) | parsear el stream SSE a mano (más código y más frágil) |
+| `ai` | 7.0.183 | runtime | `ToolLoopAgent`, `tool`, `Output`, `isStepCount`, `registerTelemetry`, UI message stream | — (es el stack definido) |
+| `@neon/ai-sdk-provider` | 1.6.0 | runtime | provider del gateway; se instancia con `createNeon` y la config validada de `lib/env.ts`, y enruta por dialecto. Soporta `ai@^6 \|\| ^7` | `@ai-sdk/openai` con `createOpenAI` con `apiKey` = `NEON_AI_GATEWAY_TOKEN` y `baseURL` = `NEON_AI_GATEWAY_BASE_URL` + `/openai/v1` |
+| `@ai-sdk/react` | 4.0.188 | runtime | `useChat` y el parseo del stream en el cliente (depende de `ai@7.0.183` exacta) | parsear el stream SSE a mano (más código y más frágil) |
 | `zod` | 4.6.7 | runtime | esquemas de inputs, herramientas, Finnhub y salida | — (pedido explícito) |
 | `server-only` | 0.0.1 | runtime | hace fallar el build si se importa código de servidor desde el cliente | ninguna equivalente |
 | `@langfuse/otel` | 6.1.1 | runtime | `LangfuseSpanProcessor` (filtro por defecto, `mask`, `forceFlush`) | SDK con instrumentación manual de cada paso |
 | `@langfuse/vercel-ai-sdk` | 6.1.1 | runtime | `LangfuseVercelAiSdkIntegration` para `registerTelemetry` de AI SDK 7 (requiere `ai >=7 <8` y Node ≥ 22) | `@ai-sdk/otel` genérico, con menos mapeo al modelo de datos de Langfuse |
 | `@langfuse/tracing` | 6.1.1 | runtime | `startActiveObservation` y `propagateAttributes` para la traza raíz (nombre, input/output, metadata) | trazas sin input/output legibles en la raíz |
 | `@opentelemetry/sdk-trace-node` | 2.12.0 | runtime | `NodeTracerProvider` que recibe los spans | `@vercel/otel` v2+ con `registerOTel` |
-| `@opentelemetry/api` | 1.10.0 | runtime | peer dependency de `@langfuse/vercel-ai-sdk` (`^1.9.0`); se instala explícita | — |
+| `@opentelemetry/api` | 1.9.1 | runtime | peer de los paquetes de Langfuse (`^1.9.0`) y del SDK de OTel 2.x (`<1.10.0`); 1.10.0 rompe la resolución. Se instala explícita | — |
 | `tsx` | 4.23.15 | dev | correr `scripts/eval.ts` y los tests `node:test` con alias `@/` y `--conditions` | type stripping nativo de Node 22, que exige extensiones `.ts` en imports y no resuelve `@/` |
 
-Las versiones de la tabla son las `latest` al momento del diseño y se fijan exactas (`--save-exact`). Si al instalar hubo una versión nueva, se toma la `latest` de cada paquete, siempre que `ai` siga en 7.x y `npm ls` no muestre conflictos de peers. `@ai-sdk/otel` no se instala aparte: es dependencia de `@langfuse/vercel-ai-sdk`.
+Notas de la instalación (2026-11-26):
+- Se tomaron las `latest` de ese día. `ai` y `@ai-sdk/react` subieron de patch respecto del diseño (7.0.181 → 7.0.183 y 4.0.186 → 4.0.188), porque `@ai-sdk/react` fija `ai` en versión exacta y con la versión vieja habría quedado una segunda copia de `ai`.
+- `@opentelemetry/api` bajó a 1.9.1: con 1.10.0, `npm install` falla por el peer `<1.10.0` de `@opentelemetry/core` y `@opentelemetry/sdk-trace-node` 2.x.
+- npm instaló solos los peers de `@langfuse/otel`: `@opentelemetry/core` y `@opentelemetry/sdk-trace-base` 2.12.1, y `@opentelemetry/exporter-trace-otlp-http` 0.223.2. `@ai-sdk/otel` llega como dependencia de `@langfuse/vercel-ai-sdk`.
+- `npm audit`: 0 vulnerabilidades. `npm ls`: sin errores de peers, una sola copia de `ai`, `zod` y `@opentelemetry/api`.
 
 ## Risks / Trade-offs
 
@@ -182,6 +187,7 @@ Las versiones de la tabla son las `latest` al momento del diseño y se fijan exa
 - **AI SDK 7 es solo ESM y exige Node ≥ 22** → Next.js y `tsx` cargan ESM sin cambios; el `package.json` declara `"engines": { "node": ">=22" }`.
 - **Endpoint público sin auth ni rate limit propio** → cualquiera que llegue a la URL consume créditos del gateway y cuota de Finnhub. Mitigación en este cambio: límites de pasos, tokens y largo de la pregunta. Auth y rate limiting quedan fuera de alcance; no conviene desplegarlo público así.
 - **Costo en Langfuse depende de las definiciones de modelo** → si el ID de `MODEL_MARKET_DATA` no matchea ninguna definición, el trace muestra tokens pero costo vacío. Mitigación: cargar la definición en Langfuse al elegir el modelo (tarea explícita).
+- **SDK de OTel duplicado y deprecado** → `@opentelemetry/sdk-trace-node@2.12.0` trae `core`/`sdk-trace-base` 2.12.0, y los peers de `@langfuse/otel` resolvieron 2.12.1. Además, npm marca `sdk-trace-node` como deprecado en favor de `@opentelemetry/sdk-trace`. Mitigación: las interfaces son compatibles; si en la tarea 6.1 hay errores de tipos al pasar el `LangfuseSpanProcessor` al `NodeTracerProvider`, evaluar `@opentelemetry/sdk-trace` (con aprobación, porque es otra dependencia).
 - **Evals con modelo real** → cuestan créditos y pueden variar. Mitigación: checks numéricos con tolerancia y fecha de referencia fija.
 - **`cacheComponents` activo** → el route handler es `POST`, así que no se prerenderiza. La página de chat es un componente cliente sin datos de servidor, así que no aplican restricciones de prerender.
 

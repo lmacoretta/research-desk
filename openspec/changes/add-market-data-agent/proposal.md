@@ -13,7 +13,7 @@ Research Desk todavía no tiene ningún agente: el repo es el scaffold de Next.j
 - Agregar una UI de chat con streaming: cada llamada a herramienta aparece como una tarjeta (pendiente / ok / error) con sus parámetros y su resultado, y la respuesta final se renderiza de forma segura.
 - Agregar tracing con Langfuse: cada paso, el uso de tokens y el costo por consulta, sin registrar claves ni headers.
 - Agregar un script `npm run eval` que corre 10 preguntas con respuesta conocida contra los fixtures y reporta cuántas pasan.
-- Nuevas dependencias (AI SDK, provider de Neon, zod, Langfuse/OpenTelemetry, etc.): quedan como **decisión pendiente** en el design; no se instala nada sin aprobación.
+- Nuevas dependencias (AI SDK, provider de Neon, zod, Langfuse/OpenTelemetry, etc.): aprobadas por el usuario e instaladas con versiones exactas (ver Decisión 12 del design).
 
 ## Capabilities
 
