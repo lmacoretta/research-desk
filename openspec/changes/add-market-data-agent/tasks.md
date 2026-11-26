@@ -10,10 +10,10 @@
 
 ## 2. Herramientas de market data (`market-data-tools`)
 
-- [ ] 2.1 Crear `lib/market-data/schemas.ts` (ticker estricto, fechas `YYYY-MM-DD` con rango ≤ 366 días y no futuro, formas normalizadas de resultado, códigos de error) y `errors.ts`; verificar con tests de tickers válidos (`AAPL`, `BRK.B`) e inválidos (`aapl`, `../quote`, `AAPL?x=1`, `TOOLONG`) y de rangos invertidos o largos
-- [ ] 2.2 Definir la interfaz `MarketDataSource` y la implementación `source/finnhub.ts` (base fija, header `X-Finnhub-Token`, timeout de 8 s, mapeo 429/401/403/5xx/timeout); verificar con tests que inyectan un `fetch` falso: la URL no contiene la clave, la ruta es la constante esperada y cada status mapea al código correcto
-- [ ] 2.3 Crear fixtures con forma de Finnhub en `evals/fixtures/finnhub/{quote,candle,metric}/` para AAPL, MSFT y NVDA, y la implementación `source/fixtures.ts` (sin red, `NOT_FOUND` si falta el archivo); verificar con un test que lee los tres tickers y devuelve `NOT_FOUND` para `ZZZZ`
-- [ ] 2.4 Crear `source/index.ts` que elige la fuente según `MARKET_DATA_SOURCE`; verificar con un test para cada valor
+- [x] 2.1 Crear `lib/market-data/schemas.ts` (ticker estricto, fechas `YYYY-MM-DD` con rango ≤ 366 días y no futuro, formas normalizadas de resultado, códigos de error) y `errors.ts`; verificar con tests de tickers válidos (`AAPL`, `BRK.B`) e inválidos (`aapl`, `../quote`, `AAPL?x=1`, `TOOLONG`) y de rangos invertidos o largos
+- [x] 2.2 Definir la interfaz `MarketDataSource` y la implementación `source/finnhub.ts` (base fija, header `X-Finnhub-Token`, timeout de 8 s, mapeo 429/401/403/5xx/timeout); verificar con tests que inyectan un `fetch` falso: la URL no contiene la clave, la ruta es la constante esperada y cada status mapea al código correcto
+- [x] 2.3 Crear fixtures con forma de Finnhub en `evals/fixtures/finnhub/{quote,candle,metric}/` para AAPL, MSFT y NVDA, y la implementación `source/fixtures.ts` (sin red, `NOT_FOUND` si falta el archivo); verificar con un test que lee los tres tickers y devuelve `NOT_FOUND` para `ZZZZ`
+- [x] 2.4 Crear `source/index.ts` que elige la fuente según `MARKET_DATA_SOURCE`; verificar con un test para cada valor
 - [ ] 2.5 Implementar `createMarketDataTools(source)` en `lib/market-data/tools.ts` con las tres herramientas (`inputSchema` `.strict()`, `execute` que nunca lanza, validación zod de la respuesta cruda, normalización, `NOT_FOUND` por quote/candle/metric vacíos, métricas faltantes en `null`, procedencia con `provider`/`endpoint`/`ticker`/`fetchedAt`); verificar con tests sobre la fuente de fixtures y sobre una fuente falsa que devuelve cuerpos mal formados (`UPSTREAM_UNAVAILABLE`)
 - [ ] 2.6 Verificar el desacople: un test importa `lib/market-data/tools.ts` sin importar nada de `lib/agents/`, y `grep` confirma que `lib/market-data` no importa de `lib/agents` ni de `app/`
 

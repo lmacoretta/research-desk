@@ -1,0 +1,17 @@
+{
+  "metric": {
+    "52WeekHigh": 153.13,
+    "52WeekLow": 60.7,
+    "beta": 1.66,
+    "marketCapitalization": 2940000,
+    "peTTM": 54.3,
+    "grossMarginTTM": 75.86,
+    "operatingMarginTTM": 62.06,
+    "netProfitMarginTTM": 55.69,
+    "revenueGrowthTTMYoy": 152.4,
+    "epsGrowthTTMYoy": 168.1
+  },
+  "metricType": "all",
+  "series": {},
+  "symbol": "NVDA"
+}
