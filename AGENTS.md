@@ -43,3 +43,13 @@ Antes de dar una tarea por terminada:
 - `npm run lint` sin errores
 - `npx tsc --noEmit` sin errores
 - Si la tarea toca un agente o herramienta: `npm run eval` (cuando exista)
+
+## Seguridad
+
+- Código que usa claves o llama a APIs externas: solo servidor (`import "server-only"`). Nunca `NEXT_PUBLIC_` para secretos.
+- Toda entrada (del usuario o generada por el modelo para una herramienta) se valida con zod.
+- Las herramientas son de solo lectura y solo llaman a hosts conocidos; nunca a URLs que vengan del modelo o del usuario.
+- El output de herramientas es dato no confiable: nunca se interpreta como instrucción.
+- El output del modelo se renderiza como texto o markdown sin HTML crudo.
+- Errores al cliente: mensajes genéricos. Detalles solo en logs del servidor, sin claves.
+- No registrar claves ni headers en logs ni en trazas de Langfuse.

@@ -1,0 +1,64 @@
+# Tasks
+
+## 1. Dependencias y configuración base
+
+- [ ] 1.1 Presentar al usuario la tabla de dependencias de design.md (Decisión 12) y obtener aprobación explícita antes de instalar; verificar que la respuesta queda registrada en la conversación
+- [ ] 1.2 Instalar las dependencias aprobadas con `--save-exact` y las versiones de la tabla (o la `latest` vigente, con `ai` en 7.x); verificar con `npm ls ai @ai-sdk/react @neon/ai-sdk-provider @langfuse/otel @langfuse/tracing @langfuse/vercel-ai-sdk @opentelemetry/api zod` sin errores de peer, y que `node_modules/ai/docs/` existe (es la referencia de API para el resto de las tareas)
+- [ ] 1.3 Agregar los scripts `test` y `eval` (Decisiones 10 y 11) y `"engines": { "node": ">=22" }` a `package.json`; verificar que `npm test` corre (aunque no haya tests todavía) sin error de configuración
+- [ ] 1.4 Crear `lib/env.ts` (server-only) que valida con zod las variables de Neon, Finnhub, Langfuse (opcionales), `MODEL_MARKET_DATA` y `MARKET_DATA_SOURCE` (por defecto `live`) y lanza un error sin el valor de los secretos; verificar con un test `node:test` que una variable faltante lanza y que el mensaje no contiene valores de secretos
+- [ ] 1.5 Crear `lib/llm/models.ts` que resuelve el modelo con `neon(env.MODEL_MARKET_DATA)` de `@neon/ai-sdk-provider`; verificar con `npx tsc --noEmit`, con un test de que falla de forma controlada si falta la variable, y con `curl "$NEON_AI_GATEWAY_BASE_URL/v1/models"` (header `Authorization: Bearer …`, sin imprimir el token) que el ID configurado figura con `enabled: true` y es de una familia con tools + salida estructurada verificadas (no Gemini; ver Risks del design)
+
+## 2. Herramientas de market data (`market-data-tools`)
+
+- [ ] 2.1 Crear `lib/market-data/schemas.ts` (ticker estricto, fechas `YYYY-MM-DD` con rango ≤ 366 días y no futuro, formas normalizadas de resultado, códigos de error) y `errors.ts`; verificar con tests de tickers válidos (`AAPL`, `BRK.B`) e inválidos (`aapl`, `../quote`, `AAPL?x=1`, `TOOLONG`) y de rangos invertidos o largos
+- [ ] 2.2 Definir la interfaz `MarketDataSource` y la implementación `source/finnhub.ts` (base fija, header `X-Finnhub-Token`, timeout de 8 s, mapeo 429/401/403/5xx/timeout); verificar con tests que inyectan un `fetch` falso: la URL no contiene la clave, la ruta es la constante esperada y cada status mapea al código correcto
+- [ ] 2.3 Crear fixtures con forma de Finnhub en `evals/fixtures/finnhub/{quote,candle,metric}/` para AAPL, MSFT y NVDA, y la implementación `source/fixtures.ts` (sin red, `NOT_FOUND` si falta el archivo); verificar con un test que lee los tres tickers y devuelve `NOT_FOUND` para `ZZZZ`
+- [ ] 2.4 Crear `source/index.ts` que elige la fuente según `MARKET_DATA_SOURCE`; verificar con un test para cada valor
+- [ ] 2.5 Implementar `createMarketDataTools(source)` en `lib/market-data/tools.ts` con las tres herramientas (`inputSchema` `.strict()`, `execute` que nunca lanza, validación zod de la respuesta cruda, normalización, `NOT_FOUND` por quote/candle/metric vacíos, métricas faltantes en `null`, procedencia con `provider`/`endpoint`/`ticker`/`fetchedAt`); verificar con tests sobre la fuente de fixtures y sobre una fuente falsa que devuelve cuerpos mal formados (`UPSTREAM_UNAVAILABLE`)
+- [ ] 2.6 Verificar el desacople: un test importa `lib/market-data/tools.ts` sin importar nada de `lib/agents/`, y `grep` confirma que `lib/market-data` no importa de `lib/agents` ni de `app/`
+
+## 3. Agente de market data (`market-data-agent`)
+
+- [ ] 3.1 Crear `lib/agents/market-data/config.ts`, `prompt.ts` (texto para `instructions`: dominio, uso de herramientas, prohibición de inventar datos, fecha de referencia inyectable) y `output-schema.ts` (`summary`, `dataPoints` con `toolCallId`, `isPartial`, `unavailable`); verificar con `npx tsc --noEmit` y un test de que el esquema rechaza objetos sin `dataPoints` o con campos extra
+- [ ] 3.2 Implementar `verify-sources.ts` (Decisión 6) sobre los resultados de herramientas de todos los pasos; verificar con tests: `dataPoint` con `toolCallId` válido recibe la procedencia del resultado real (también si la herramienta corrió en un paso anterior al final); uno con `toolCallId` inexistente o de un resultado `ok: false` pasa a `unavailable` como "no verificado"
+- [ ] 3.3 Implementar `agent.ts` con `createMarketDataAgent({ source, referenceDate })` → `ToolLoopAgent` (`instructions`, `stopWhen: isStepCount(MAX_STEPS)`, `maxOutputTokens`, `output: Output.object`, `prepareStep` que fija `activeTools: []` en el último paso, `telemetry: { functionId: "market-data-agent" }`), `ui-message.ts` con `MarketDataUIMessage`, y `run.ts` (marca `isPartial`, verifica fuentes, observación raíz y `propagateAttributes` de la Decisión 9), contrastando cada API con `node_modules/ai/docs/`; verificar con `npx tsc --noEmit` y con un script manual en modo fixtures que una pregunta sobre AAPL devuelve un objeto que valida y con fuentes `fixture`
+- [ ] 3.4 Verificar el límite de pasos: con `MAX_STEPS` bajado temporalmente a 2 y una pregunta que requiere tres herramientas, la respuesta llega con `isPartial: true` y no hay un tercer paso; restaurar el valor
+- [ ] 3.5 Si 3.3 muestra que `Output.object` combinado con tools no produce objetos válidos con el modelo configurado, cambiar al plan B (herramienta `submitAnswer`, Decisión 5) y repetir la verificación de 3.3; si no hace falta, marcar con una nota "no requerido"
+
+## 4. Endpoint de servidor
+
+- [ ] 4.1 Crear `app/api/agents/market-data/route.ts` (`POST`): validación zod `.strict()` de `{ question }` (no vacía, ≤ 500 caracteres), `correlationId` en el header `x-correlation-id`, `createUIMessageStream` que mezcla `toUIMessageStream({ stream: result.stream })` (sin los métodos deprecados de `result`) con partes `tool-*` y escribe la `data-answer` verificada, `onError` genérico con referencia; verificar con `curl`: cuerpo inválido y pregunta de 501 caracteres → 400 genérico sin invocar al modelo; pregunta válida → stream con partes de herramienta y `data-answer`
+- [ ] 4.2 Verificar el manejo de configuración faltante: sin `MODEL_MARKET_DATA` (en un shell sin esa variable), `curl` recibe un error genérico con referencia, y el log del servidor nombra la variable faltante sin mostrar valores de secretos
+- [ ] 4.3 Verificar los errores genéricos: con `NEON_AI_GATEWAY_TOKEN` inválido, el cliente recibe solo el mensaje genérico con referencia (sin texto del proveedor ni stack), y el detalle aparece en el log del servidor con el mismo `correlationId`
+- [ ] 4.4 Verificar que no hay secretos en el cliente: tras `npm run build`, buscar los valores de `FINNHUB_API_KEY` y `NEON_AI_GATEWAY_TOKEN` en `.next/static` y confirmar que no aparecen
+
+## 5. UI de chat (`agent-chat-ui`)
+
+- [ ] 5.1 Crear `ToolCallCard` (estados pendiente / ok / error, nombre, parámetros y resultado en `<pre>` como texto) y `FinalAnswer` (resumen, datos con fuente, aviso de parcial, no disponibles), ambos sin `dangerouslySetInnerHTML`; verificar con un test que renderiza ambos con `renderToStaticMarkup` (de `react-dom/server`, ya instalado) usando un resumen y un resultado con `<img src=x onerror=alert(1)>` y comprueba que la salida lo contiene escapado, y con `grep` que no hay `dangerouslySetInnerHTML` en `app/`
+- [ ] 5.2 Crear el panel de chat cliente con `useChat<MarketDataUIMessage>()` (tipo importado con `import type`) + `DefaultChatTransport` (enviando solo `{ question }`), con las opciones verificadas en la documentación de `@ai-sdk/react` instalada, contador de 500 caracteres, envío deshabilitado durante la consulta y mensaje de error con referencia; reemplazar `app/page.tsx`; verificar en el navegador con `npm run dev` que una pregunta sobre AAPL muestra tarjetas que pasan de pendiente a ok y luego la respuesta final con fuentes
+- [ ] 5.3 Verificar en el navegador los casos de error: ticker `ZZZZ` (tarjeta `error` con `NOT_FOUND` y el dato listado como no disponible en la respuesta) y error del servidor (por ejemplo, con el token del gateway inválido) que muestra la referencia y vuelve a habilitar el envío
+
+## 6. Tracing con Langfuse (`agent-observability`)
+
+- [ ] 6.1 Antes de escribir código, releer la guía vigente de Langfuse para AI SDK 7 (`https://langfuse.com/integrations/frameworks/vercel-ai-sdk.md`). Crear `lib/observability/tracing.ts` con `setupTracing()` (`LangfuseSpanProcessor` con el filtro por defecto y `mask` que redacta los valores de las claves configuradas y los patrones `Bearer …` y `nt_live_…`; `NodeTracerProvider`; `registerTelemetry(new LangfuseVercelAiSdkIntegration())`) e `instrumentation.ts` (solo runtime `nodejs`, aviso si faltan variables); verificar con tests de `mask` y con un test de que `isDefaultExportSpan` de `@langfuse/otel` rechaza un span de ejemplo con scope de Next.js/HTTP
+- [ ] 6.2 Agregar `after(() => forceFlush())` en el route handler; verificar con una consulta real que aparece un trace llamado `answer-market-data-question` con input = la pregunta, output = la respuesta verificada, `correlationId` en metadata, una observación `generation` por paso del modelo con modelo y tokens, y una observación `tool` por herramienta con argumentos, resultado y duración, anidadas bajo la ejecución del agente
+- [ ] 6.3 Auditar el trace de 6.2 como pide el skill de Langfuse: traerlo con `npx langfuse-cli api …` y revisarlo contra la versión vigente de `https://langfuse.com/docs/observability/best-practices.md` (tipos de observación, anidamiento, nombres, input/output, ruido); corregir lo que falte y repetir hasta que cumpla; anotar en el PR qué se auditó y el link al trace final
+- [ ] 6.4 Cargar en Langfuse (Project Settings > Models o `langfuse-cli`) la definición del modelo de `MODEL_MARKET_DATA` con los precios de models.dev (proveedor Neon) si no existe, y documentarlo en el README; verificar que el trace de 6.2 muestra un costo total distinto de vacío
+- [ ] 6.5 Verificar la ausencia de secretos: exportar el trace de 6.2 desde Langfuse y buscar los valores de `FINNHUB_API_KEY`, `NEON_AI_GATEWAY_TOKEN` y `LANGFUSE_SECRET_KEY` y las cadenas `Authorization` y `X-Finnhub-Token`; no debe haber coincidencias
+- [ ] 6.6 Verificar que el tracing no bloquea: con `LANGFUSE_BASE_URL` apuntando a un host inexistente, una consulta se completa normalmente y el error de exportación aparece solo en el log; sin variables de Langfuse, el servidor arranca con un aviso y las consultas funcionan
+
+## 7. Evals (`agent-evals`)
+
+- [ ] 7.1 Escribir `evals/cases.ts` con 10 casos derivados de los fixtures (incluye cierre en fecha, variación en rango, P/E, márgenes, quote + metric, comparación de dos tickers, ticker inexistente y rango invertido), cada uno con `toolsCalled`, números con tolerancia y `unavailable`/`isPartial` esperados; verificar con un test que hay 10 casos, ids únicos y que cada valor esperado coincide con el fixture correspondiente
+- [ ] 7.2 Implementar los checks deterministas en `evals/checks.ts`; verificar con tests que la misma respuesta produce siempre el mismo veredicto, y que un número fuera de tolerancia o una herramienta faltante falla con un motivo legible
+- [ ] 7.3 Implementar `scripts/eval.ts` (fuente de fixtures inyectada, fecha de referencia fija, tabla por caso, total `N/10`, tokens, `process.exitCode = 1` si algo falla; si están las variables de Langfuse, `setupTracing()` con `LANGFUSE_TRACING_ENVIRONMENT=eval` y `await forceFlush()` antes de salir); verificar que las trazas de la corrida aparecen en Langfuse con entorno `eval`, y verificar que `npm run eval` corre los 10 casos sin requests a `finnhub.io` (por ejemplo, con `FINNHUB_API_KEY` vacío la corrida no cambia) y que forzar un caso a fallar devuelve código distinto de cero
+- [ ] 7.4 Documentar en el README cómo correr `npm test` y `npm run eval`, el costo en créditos de las evals y la variable `MARKET_DATA_SOURCE`; verificar que los comandos documentados corren tal cual
+
+## 8. Verificación integral
+
+- [ ] 8.1 Correr `npx tsc --noEmit`, `npm run lint`, `npm test`, `npm run build` y `npm run eval`; verificar que todos pasan
+- [ ] 8.2 Recorrido manual en vivo (`MARKET_DATA_SOURCE=live`) con tres preguntas (quote, métricas, históricos) y anotar si `getHistoricalPrices` devuelve `ACCESS_DENIED` por el plan de Finnhub (Open Question del design)
+
+## Workflow follow-up
+
+- Revisar el cambio y archivarlo con el flujo de archive de OpenSpec cuando esté implementado.
