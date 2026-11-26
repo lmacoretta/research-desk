@@ -79,7 +79,9 @@ Todo lo que está bajo `lib/` empieza con `import "server-only"`. **Alternativa 
 
 `createMarketDataTools(source)` devuelve las tres herramientas, con `inputSchema` zod `.strict()` y ticker `^[A-Z]{1,5}(\.[A-Z]{1,2})?$`. `execute` nunca lanza: devuelve `{ ok: true, data, provenance }` o `{ ok: false, error: { code, message } }`. Así el modelo ve el error y puede seguir, y la UI distingue el error de herramienta (resultado `ok: false`, tarjeta `error`) del error del sistema.
 
-Si el modelo manda un input que falla `inputSchema`, el AI SDK produce un error de llamada (estado `output-error`). Ese caso también se mapea a `INVALID_TICKER` o `INVALID_INPUT` con un mensaje genérico.
+**Input inválido: sin revalidación en `execute`.** Si el modelo manda un input que falla `inputSchema`, el AI SDK no llama a `execute`: marca la llamada como inválida (`invalid: true`, `dynamic: true`) y le devuelve al modelo un `tool-error` con el mensaje de validación. Ese mensaje solo contiene el input que mandó el propio modelo y los issues de zod, sin datos sensibles, y lo ayuda a corregirse en el paso siguiente. Por eso `execute` no revalida.
+
+Hacia el cliente, el SDK emite ese caso como chunks `tool-input-error` y `tool-output-error` con `errorText`. El endpoint (Decisión 7) reemplaza ese `errorText` antes de enviarlo. Para eso valida el `input` del chunk con el `inputSchema` de la herramienta y lo mapea con `toolErrorFromInputIssues`: `INVALID_TICKER` si el problema está en el ticker, `INVALID_INPUT` si no. El `errorText` pasa a ser `JSON.stringify({ code, message })`, con el mensaje fijo de `toolError`. El `tool-output-error` con el mismo `toolCallId` recibe el mismo texto, y cualquier otro `tool-output-error` recibe `UPSTREAM_UNAVAILABLE`. La UI (Decisión 8) muestra la tarjeta en estado `error` con ese código y mensaje.
 
 **Alternativa descartada:** lanzar excepciones y dejar que el SDK las serialice; el mensaje crudo podría filtrar detalles internos al modelo y al cliente.
 
@@ -110,6 +112,7 @@ El modelo nunca escribe la procedencia, así que no la puede inventar.
 - `POST /api/agents/market-data`. El cuerpo `{ question }` se valida con zod `.strict()`, con un tope de 500 caracteres (`trim`, no vacío). Si falla, responde 400 genérico.
 - Se genera un `correlationId` (`crypto.randomUUID()`) que va en el header `x-correlation-id`, en los metadatos del trace y en los logs.
 - La respuesta es un UI message stream del AI SDK: `createUIMessageStream<MarketDataUIMessage>({ execute, onError })` + `createUIMessageStreamResponse`. Dentro de `execute`, el stream del agente se convierte con el helper sin estado `toUIMessageStream({ stream: result.stream })` y se mezcla con `writer.merge(…)`; los métodos `result.toUIMessageStream()`/`toUIMessageStreamResponse()` están deprecados en AI SDK 7 y no se usan. Las partes `tool-*` se transmiten tal cual (estados `input-available`, `output-available`, `output-error`), y la respuesta final se emite con `writer.write({ type: "data-answer", … })` **después** de validarla y verificarla. Las partes de texto del objeto estructurado en curso se filtran antes del merge y no se reenvían.
+- Antes del merge, los chunks `tool-input-error` y `tool-output-error` pasan por el reemplazo de `errorText` de la Decisión 4: el cliente nunca recibe el texto original del SDK, solo `{ code, message }` con un código del conjunto cerrado.
 - No se usa `createAgentUIStreamResponse`: entrega el stream del agente directo y no deja intercalar la verificación de fuentes antes de la parte final.
 - `onError` devuelve siempre `"No pudimos completar la consulta. Referencia: <correlationId>"`, y el error real va a `console.error` con el `correlationId`.
 - Si falta `MODEL_MARKET_DATA` o alguna variable de Neon o Finnhub, `lib/env.ts` lanza al resolverla. El handler lo captura, responde 500 genérico y lo registra.
@@ -121,6 +124,7 @@ El modelo nunca escribe la procedencia, así que no la puede inventar.
 `app/page.tsx` renderiza un componente cliente que usa `useChat<MarketDataUIMessage>()` de `@ai-sdk/react` con `DefaultChatTransport` hacia el endpoint (el tipo se importa con `import type`, así que no arrastra código de servidor al cliente). Como `useChat` es de las APIs que más cambian entre versiones, sus opciones se verifican contra la documentación incluida en `node_modules/@ai-sdk/react`. Con `prepareSendMessagesRequest` se envía solo `{ question }`, no el historial.
 
 - Las partes `tool-getQuote`, `tool-getHistoricalPrices` y `tool-getKeyMetrics` se muestran en `ToolCallCard`: `input-streaming`/`input-available` → pendiente; `output-available` con `ok: true` → ok; `output-available` con `ok: false` u `output-error` → error.
+- Las partes `dynamic-tool` en `output-error` (el SDK marca así las llamadas con input inválido, Decisión 4) también van a `ToolCallCard`. La tarjeta lee el `errorText` con zod (`toolErrorSchema`) y muestra su código y mensaje; si no lo puede leer, muestra un mensaje genérico.
 - Parámetros y resultados se muestran con `JSON.stringify(…, null, 2)` dentro de un `<pre>`.
 - La parte `data-answer` se muestra en `FinalAnswer`.
 - Render seguro: solo nodos de texto de React. No se usa `dangerouslySetInnerHTML`, ni un renderer de markdown, ni links o imágenes generados desde el contenido.

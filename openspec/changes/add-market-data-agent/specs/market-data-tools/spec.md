@@ -24,11 +24,11 @@ El sistema SHALL ofrecer una herramienta `getHistoricalPrices` que, dado un tick
 
 #### Scenario: Rango invertido
 - **WHEN** `from` es posterior a `to`
-- **THEN** devuelve un error tipado `INVALID_INPUT` sin consultar la fuente
+- **THEN** la llamada se rechaza antes de ejecutar la herramienta y sin consultar la fuente, y el cliente la ve como error `INVALID_INPUT`
 
 #### Scenario: Rango demasiado largo o en el futuro
 - **WHEN** el rango supera 366 días o `to` es posterior a la fecha actual
-- **THEN** devuelve un error tipado `INVALID_INPUT` sin consultar la fuente
+- **THEN** la llamada se rechaza antes de ejecutar la herramienta y sin consultar la fuente, y el cliente la ve como error `INVALID_INPUT`
 
 ### Requirement: Métricas clave
 El sistema SHALL ofrecer una herramienta `getKeyMetrics` que, dado un ticker, MUST devolver P/E, margen bruto, margen operativo, margen neto, crecimiento de ingresos y crecimiento de EPS, indicando para cada métrica su período (TTM, anual o trimestral) y usando `null` cuando la fuente no la informa.
@@ -46,14 +46,18 @@ Cada herramienta MUST validar sus parámetros antes de acceder a la fuente. El t
 
 #### Scenario: Ticker con formato inválido
 - **WHEN** se invoca una herramienta con `{ ticker: "aapl; DROP" }` o `{ ticker: "../quote" }`
-- **THEN** devuelve un error tipado `INVALID_TICKER` y no se hace ninguna llamada a la fuente
+- **THEN** la llamada se rechaza antes de ejecutar la herramienta, no se hace ninguna llamada a la fuente, y el cliente la ve como error `INVALID_TICKER`
 
 #### Scenario: Parámetro desconocido
 - **WHEN** se invoca una herramienta con un campo que no está en su esquema
-- **THEN** devuelve un error tipado `INVALID_INPUT`
+- **THEN** la llamada se rechaza antes de ejecutar la herramienta y el cliente la ve como error `INVALID_INPUT`
 
 ### Requirement: Errores tipados
 Las herramientas MUST devolver los fallos como resultado tipado, no como excepción, con un código de un conjunto cerrado (`INVALID_TICKER`, `INVALID_INPUT`, `NOT_FOUND`, `RATE_LIMITED`, `ACCESS_DENIED`, `UPSTREAM_UNAVAILABLE`) y un mensaje breve sin detalles internos, URLs ni credenciales.
+
+#### Scenario: Input que no cumple el esquema
+- **WHEN** el modelo invoca una herramienta con un input que no cumple su esquema
+- **THEN** el AI SDK rechaza la llamada antes de ejecutarla, el modelo recibe el mensaje de validación para poder corregirse, y el cliente recibe solo `INVALID_TICKER` o `INVALID_INPUT` con un mensaje genérico
 
 #### Scenario: Rate limit de la fuente
 - **WHEN** Finnhub responde HTTP 429
