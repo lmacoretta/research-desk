@@ -136,13 +136,29 @@ export type MarketDataToolsOptions = {
   now?: Clock;
 };
 
+/**
+ * Esquemas de input de cada herramienta, por nombre. Se exportan para que
+ * quien necesite revalidar un input rechazado (el endpoint, al reemplazar el
+ * `errorText` de una llamada inválida) use exactamente los mismos esquemas y
+ * el mismo reloj que las herramientas.
+ */
+export function createMarketDataInputSchemas(now?: Clock) {
+  return {
+    getQuote: tickerInputSchema,
+    getHistoricalPrices: createHistoricalPricesInputSchema(now),
+    getKeyMetrics: tickerInputSchema,
+  };
+}
+
+export type MarketDataInputSchemas = ReturnType<
+  typeof createMarketDataInputSchemas
+>;
+
 export function createMarketDataTools(
   source: MarketDataSource,
   options: MarketDataToolsOptions = {},
 ) {
-  const historicalPricesInputSchema = createHistoricalPricesInputSchema(
-    options.now,
-  );
+  const inputSchemas = createMarketDataInputSchemas(options.now);
 
   async function quote(input: TickerInput): Promise<ToolResult<QuoteData>> {
     const response = await source.quote(input.ticker);
@@ -257,14 +273,14 @@ export function createMarketDataTools(
     getQuote: tool({
       description:
         "Get the latest quote for a stock ticker: current price, change and percent change vs. the previous close, open, high, low, previous close and the quote timestamp (unix seconds).",
-      inputSchema: tickerInputSchema,
+      inputSchema: inputSchemas.getQuote,
       execute: (input) => guard("getQuote", () => quote(input)),
     }),
 
     getHistoricalPrices: tool({
       description:
         "Get daily OHLCV candles for a stock ticker between two dates (YYYY-MM-DD, inclusive, at most 366 days, not in the future), in ascending date order.",
-      inputSchema: historicalPricesInputSchema,
+      inputSchema: inputSchemas.getHistoricalPrices,
       execute: (input) =>
         guard("getHistoricalPrices", () => historicalPrices(input)),
     }),
@@ -272,7 +288,7 @@ export function createMarketDataTools(
     getKeyMetrics: tool({
       description:
         "Get key metrics for a stock ticker: P/E, gross, operating and net margins, revenue growth and EPS growth (TTM; margins and growth in percent). Missing metrics are null.",
-      inputSchema: tickerInputSchema,
+      inputSchema: inputSchemas.getKeyMetrics,
       execute: (input) => guard("getKeyMetrics", () => keyMetrics(input)),
     }),
   };

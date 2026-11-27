@@ -73,7 +73,14 @@ function isFileNotFound(error: unknown): boolean {
 export function createFixtureSource(
   options: FixtureSourceOptions = {},
 ): MarketDataSource {
-  const rootDir = path.resolve(options.rootDir ?? DEFAULT_FIXTURES_DIR);
+  // `turbopackIgnore`: con un directorio que puede venir por parámetro,
+  // Turbopack no puede acotar el acceso y trazaría todo el proyecto (incluido
+  // `.env.local`) dentro del output del servidor. Los JSON de
+  // `DEFAULT_FIXTURES_DIR` igual quedan en el trace, porque esa ruta es
+  // estática; un `rootDir` propio (tests) no se traza.
+  const rootDir = path.resolve(
+    /*turbopackIgnore: true*/ options.rootDir ?? DEFAULT_FIXTURES_DIR,
+  );
   const now = options.now ?? (() => FIXTURE_FETCHED_AT);
 
   async function read(

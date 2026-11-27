@@ -72,6 +72,12 @@ export type CreateMarketDataAgentOptions = {
   referenceDate: Date;
   model?: LanguageModel;
   maxSteps?: number;
+  /**
+   * Errores del stream del agente (por ejemplo, el gateway rechaza la
+   * llamada). Sin este callback, el SDK imprime el error entero en consola,
+   * sin el `correlationId` de la consulta.
+   */
+  onError?: (event: { error: unknown }) => void;
 };
 
 export function createMarketDataAgent({
@@ -79,6 +85,7 @@ export function createMarketDataAgent({
   referenceDate,
   model = getMarketDataModel(),
   maxSteps = MAX_STEPS,
+  onError,
 }: CreateMarketDataAgentOptions) {
   const instructions = buildMarketDataInstructions(referenceDate);
   const lastStepInstructions = `${instructions}\n\n${STEP_LIMIT_NOTICE}`;
@@ -104,6 +111,7 @@ export function createMarketDataAgent({
         ? { activeTools: [], instructions: lastStepInstructions }
         : {},
     telemetry: { functionId: MARKET_DATA_AGENT_FUNCTION_ID },
+    onError,
   });
 }
 

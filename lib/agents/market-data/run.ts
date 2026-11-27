@@ -7,6 +7,7 @@ import {
   MARKET_DATA_AGENT_FUNCTION_ID,
 } from "@/lib/agents/market-data/agent";
 import { MAX_STEPS } from "@/lib/agents/market-data/config";
+import { logMarketDataError } from "@/lib/agents/market-data/log";
 import {
   marketDataAnswerSchema,
   type MarketDataAnswer,
@@ -32,6 +33,8 @@ import type { MarketDataSource } from "@/lib/market-data/source/types";
  * - La respuesta final se valida con zod antes de devolverla. Si el modelo no
  *   produjo un objeto válido, `completion` rechaza (`NoOutputGeneratedError`
  *   del SDK) y quien llama responde con un error genérico.
+ * - Los errores del stream del agente (por ejemplo, el gateway) se registran
+ *   acá, con el `correlationId`. Quien llama no los vuelve a registrar.
  *
  * Tracing (Decisión 9): una observación raíz `answer-market-data-question`
  * con input = la pregunta y output = la respuesta verificada. Se cierra a
@@ -72,7 +75,16 @@ export async function runMarketDataAgent({
   model,
   maxSteps = MAX_STEPS,
 }: RunMarketDataAgentOptions) {
-  const agent = createMarketDataAgent({ source, referenceDate, model, maxSteps });
+  const agent = createMarketDataAgent({
+    source,
+    referenceDate,
+    model,
+    maxSteps,
+    // Acá y no en quien llama: `completion` rechaza con un
+    // `NoOutputGeneratedError` sin `cause`, así que las evals (que no leen el
+    // stream) solo ven el error real en este log.
+    onError: ({ error }) => logMarketDataError(correlationId, "model", error),
+  });
 
   return startActiveObservation(
     MARKET_DATA_TRACE_NAME,
@@ -93,7 +105,8 @@ export async function runMarketDataAgent({
               result.output,
               result.steps,
               result.toolResults,
-              result.totalUsage,
+              // Suma de todos los pasos (`totalUsage` es el alias deprecado).
+              result.usage,
             ]);
 
             const verified = verifySources(output.dataPoints, toolResults);
