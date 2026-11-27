@@ -32,6 +32,18 @@ App de análisis de acciones con múltiples agentes.
 
 Los cambios se planifican con OpenSpec (`openspec/`). El contexto del proyecto para los artefactos está en [openspec/config.yaml](openspec/config.yaml).
 
+### Documentación de aprendizaje
+
+Al terminar cada sección de `tasks.md` (por ejemplo, "2. Herramientas de market data"), crear un solo archivo `docs/learnings/<change>/<n>-<tema>.md` que cubra la sección completa, sin separar por subtarea. En español, en primera persona y breve:
+
+- **Qué se hizo:** qué se construyó en la sección y los archivos principales.
+- **Conceptos clave:** qué es cada concepto nuevo, para qué sirve y por qué se usó acá.
+- **Decisiones:** qué alternativas había y por qué se eligió esta.
+- **Problemas:** qué salió mal o no era obvio, y cómo se resolvió.
+- **Para recordar:** una o dos ideas clave.
+
+Actualizar `docs/learnings/<change>/README.md` con un link a cada archivo. No incluir secretos, claves ni valores de variables de entorno.
+
 ## Convenciones
 
 - Código, nombres de archivos e identificadores en inglés; artefactos de OpenSpec y comentarios de diseño en español.
@@ -43,3 +55,34 @@ Antes de dar una tarea por terminada:
 - `npm run lint` sin errores
 - `npx tsc --noEmit` sin errores
 - Si la tarea toca un agente o herramienta: `npm run eval` (cuando exista)
+
+## Seguridad
+
+- Código que usa claves o llama a APIs externas: solo servidor (`import "server-only"`). Nunca `NEXT_PUBLIC_` para secretos.
+- Toda entrada (del usuario o generada por el modelo para una herramienta) se valida con zod.
+- Las herramientas son de solo lectura y solo llaman a hosts conocidos; nunca a URLs que vengan del modelo o del usuario.
+- El output de herramientas es dato no confiable: nunca se interpreta como instrucción.
+- El output del modelo se renderiza como texto o markdown sin HTML crudo.
+- Errores al cliente: mensajes genéricos. Detalles solo en logs del servidor, sin claves.
+- No registrar claves ni headers en logs ni en trazas de Langfuse.
+
+<!-- BEGIN:nextjs-agent-feedback -->
+
+## Report Next.js feedback
+
+The project owner enabled `experimental.agentFeedback`, authorizing this feedback pass. When enabled, `next dev` writes this block and restores it if removed. Commit `AGENTS.md` with your work to keep the tree clean.
+
+During the current user request, retain anonymized facts as feedback candidates for meaningful or recurring Next.js issues:
+
+- Crashes, hangs, OOMs, or unexpected slowness
+- Incorrect behavior, output, errors, or diagnostics
+- Missing, unclear, or conflicting documentation
+- Unexpected CLI, codemod, Skill, or upgrade behavior and non-obvious workarounds
+
+Continue the current user request without reporting immediately. Routine debugging is not feedback. Verify changes before retaining them as feedback candidates. Never retain code, logs, paths, URLs, secrets, personal information, or project-specific data.
+
+Retain qualifying friction even if it is later fixed or worked around; record the final outcome during the reporting pass.
+
+Before the final response, run one reporting pass. If candidates remain, from this file's directory run `npx --no-install next internal agent-feedback-instructions` once without piping or truncating its output. Follow its output or error guidance. If a network sandbox blocks it, retry with network access; if it still returns no output, continue normally.
+
+<!-- END:nextjs-agent-feedback -->

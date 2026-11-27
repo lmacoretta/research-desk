@@ -1,0 +1,17 @@
+{
+  "metric": {
+    "52WeekHigh": 260.1,
+    "52WeekLow": 164.08,
+    "beta": 1.24,
+    "marketCapitalization": 3545000,
+    "peTTM": 37.8,
+    "grossMarginTTM": 46.21,
+    "operatingMarginTTM": 31.51,
+    "netProfitMarginTTM": 23.97,
+    "revenueGrowthTTMYoy": 2.02,
+    "epsGrowthTTMYoy": -0.34
+  },
+  "metricType": "all",
+  "series": {},
+  "symbol": "AAPL"
+}

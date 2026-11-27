@@ -1,0 +1,16 @@
+{
+  "metric": {
+    "52WeekHigh": 468.35,
+    "52WeekLow": 385.58,
+    "beta": 0.9,
+    "marketCapitalization": 3086000,
+    "peTTM": 34.6,
+    "grossMarginTTM": 69.35,
+    "operatingMarginTTM": 44.96,
+    "netProfitMarginTTM": 35.43,
+    "epsGrowthTTMYoy": 10.3
+  },
+  "metricType": "all",
+  "series": {},
+  "symbol": "MSFT"
+}
