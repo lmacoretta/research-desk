@@ -32,6 +32,18 @@ App de análisis de acciones con múltiples agentes.
 
 Los cambios se planifican con OpenSpec (`openspec/`). El contexto del proyecto para los artefactos está en [openspec/config.yaml](openspec/config.yaml).
 
+### Documentación de aprendizaje
+
+Al terminar cada sección de `tasks.md` (por ejemplo, "2. Herramientas de market data"), crear un solo archivo `docs/learnings/<change>/<n>-<tema>.md` que cubra la sección completa, sin separar por subtarea. En español, en primera persona y breve:
+
+- **Qué se hizo:** qué se construyó en la sección y los archivos principales.
+- **Conceptos clave:** qué es cada concepto nuevo, para qué sirve y por qué se usó acá.
+- **Decisiones:** qué alternativas había y por qué se eligió esta.
+- **Problemas:** qué salió mal o no era obvio, y cómo se resolvió.
+- **Para recordar:** una o dos ideas clave.
+
+Actualizar `docs/learnings/<change>/README.md` con un link a cada archivo. No incluir secretos, claves ni valores de variables de entorno.
+
 ## Convenciones
 
 - Código, nombres de archivos e identificadores en inglés; artefactos de OpenSpec y comentarios de diseño en español.

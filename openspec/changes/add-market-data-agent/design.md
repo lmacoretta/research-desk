@@ -93,7 +93,8 @@ El skill `ai-sdk` recomienda usar la abstracción de agente del SDK (`ToolLoopAg
 - En AI SDK 7 el system prompt se pasa como `instructions` (ya no `system`), y el helper de límite es `isStepCount` (ya no `stepCountIs`).
 - Límites en `agents/market-data/config.ts`: `MAX_STEPS = 8`, `MAX_OUTPUT_TOKENS = 1024`, `MAX_QUESTION_CHARS = 500`. El default de `ToolLoopAgent` es 20 pasos, así que `stopWhen` se fija explícitamente.
 - **La salida estructurada cuenta como un paso.** Según la documentación del SDK, generar el objeto final consume un paso del loop; por eso `MAX_STEPS = 8` deja hasta 7 pasos con herramientas más el de la respuesta.
-- **Respuesta parcial al llegar al límite:** con `prepareStep`, en el último paso permitido (`stepNumber === MAX_STEPS - 1`) se fija `activeTools: []` para forzar la respuesta final. Si eso ocurrió, el servidor marca `isPartial: true`.
+- **Respuesta parcial al llegar al límite:** con `prepareStep`, en el último paso permitido (`stepNumber === MAX_STEPS - 1`) se fija `activeTools: []` para forzar la respuesta final. Si eso ocurrió, el servidor marca `isPartial: true`. En ese paso, `prepareStep` también agrega a las `instructions` un aviso (`STEP_LIMIT_NOTICE`) para que el modelo sepa por qué ya no tiene herramientas. El criterio es "se usaron todos los pasos": si el modelo ya tenía todo y respondió justo en el paso forzado, la respuesta igual sale como parcial (falso positivo aceptado; con 8 pasos es raro).
+- **Un solo camino de ejecución:** `runMarketDataAgent` usa `agent.stream()` y devuelve `{ stream, completion }`. El route handler reenvía `stream`; las evals solo esperan `completion` (las promesas del resultado consumen el stream por su cuenta). Así no hace falta un camino aparte con `agent.generate()`.
 - **Tipos de UI:** `ui-message.ts` define `MarketDataUIMessage` a partir de `InferAgentUIMessage<typeof agent>` más la parte `data-answer`, y el cliente lo usa en `useChat<MarketDataUIMessage>()` para tener tipadas las partes `tool-*`.
 - **Fecha de referencia:** las `instructions` incluyen la fecha actual (o una fija en modo eval) para que el modelo resuelva "ayer" y "el último mes" sin adivinar.
 - **Alternativa considerada:** una herramienta final `submitAnswer` con el esquema como input y `toolChoice: "required"`. Queda como plan B si `Output.object` combinado con tools no se comporta bien con los modelos del gateway; las specs no cambian.
@@ -106,6 +107,10 @@ El esquema que ve el modelo pide, en cada `dataPoint`, `label`, `value`, `unit`,
 - si no, lo saca de `dataPoints` y lo agrega a `unavailable` con el motivo "no verificado".
 
 El modelo nunca escribe la procedencia, así que no la puede inventar.
+
+**Ajustes de la implementación (tarea 3.3):**
+- **El modelo tiene que ver el `toolCallId`.** En la primera prueba con `gpt-5-4-nano`, el ID de la llamada no le llegaba al modelo como texto: inventó citas como `getQuote:AAPL` y todos los datos quedaron como "no verificado". `agent.ts` envuelve cada herramienta con `toModelOutput`, que le muestra al modelo `{ toolCallId, result }`. Solo cambia lo que lee el modelo: `toolResults`, el stream hacia la UI y la verificación usan el resultado original. Vive en el agente y no en `lib/market-data`, porque la cita es una necesidad de este agente.
+- **El ticker también se verifica.** Un dato se acepta solo si su `ticker` coincide con el de la procedencia del resultado citado. Si no, un precio de MSFT citado con una llamada de AAPL saldría con una fuente válida pero equivocada.
 
 ### 7. Endpoint y protocolo de streaming
 
@@ -149,7 +154,7 @@ Para AI SDK 7, Langfuse recomienda su integración `@langfuse/vercel-ai-sdk` reg
 
 - `evals/fixtures/finnhub/…`: JSON estáticos con forma de Finnhub para AAPL, MSFT y NVDA (quote, candle de un mes fijo, metric). Ningún fixture para `ZZZZ`.
 - `evals/cases.ts`: 10 casos `{ id, question, expect: { toolsCalled, numbers: [{ label, value, tolerance }], unavailable?, isPartial? } }`. Incluyen al menos: cierre en una fecha, variación porcentual en un rango, P/E, márgenes, combinación de quote + metric, comparación entre dos tickers, ticker inexistente y rango invertido.
-- `scripts/eval.ts` llama a `runMarketDataAgent` con la fuente de fixtures y una fecha de referencia fija (internamente, `agent.generate()`), consume el resultado completo y aplica checks deterministas sobre la respuesta verificada y la lista de llamadas a herramientas. Imprime una tabla, el total `N/10` y los tokens, y termina con `process.exitCode = 1` si algo falla.
+- `scripts/eval.ts` llama a `runMarketDataAgent` con la fuente de fixtures y una fecha de referencia fija (espera `completion`, sin leer el stream; ver Decisión 5), consume el resultado completo y aplica checks deterministas sobre la respuesta verificada y la lista de llamadas a herramientas. Imprime una tabla, el total `N/10` y los tokens, y termina con `process.exitCode = 1` si algo falla.
 - Script npm: `"eval": "tsx --conditions=react-server --env-file=.env.local scripts/eval.ts"`. `--conditions=react-server` hace que `import "server-only"` no lance fuera de Next, y `--env-file` evita sumar `dotenv`.
 - Tracing en evals: `instrumentation.ts` no corre fuera de Next, así que el script llama a `setupTracing()` si están las variables de Langfuse, con `LANGFUSE_TRACING_ENVIRONMENT=eval`, y hace `await spanProcessor.forceFlush()` antes de salir. Sin el flush, un script corto termina antes de exportar y las trazas se pierden.
 - Las evals usan el modelo real vía gateway: consumen créditos y tienen algo de variabilidad. Los checks se apoyan en valores numéricos y en herramientas llamadas, no en el texto del resumen.
